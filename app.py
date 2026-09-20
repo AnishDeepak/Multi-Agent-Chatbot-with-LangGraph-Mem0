@@ -1,6 +1,8 @@
 import streamlit as st
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from memory_manager import search_memories, save_memory
 
 from database import checkpointer
 from graph import build_graph
@@ -265,6 +267,32 @@ elif st.session_state.page == "chat":
         )
 
         if user_query:
+           
+
+            # Retrieve long-term memories
+            memories = search_memories(
+                query=user_query,
+                user_id=st.session_state.user_id,
+            )
+            memory_results = memories.get("results", [])
+            print(f'Retrievd memories from mem0: {memories}')
+            if memory_results:
+                memory_text = "\n".join(f"- {item['memory']}" for item in memory_results)
+
+
+                # Add memories to the query context
+        
+                enriched_query = f"""
+                    Relevant user memories:
+                    {memory_text}
+
+                    Current user query:
+                    {user_query}
+                    """
+            else:
+                enriched_query = user_query
+
+            print(f'-------\n user query : {enriched_query}\n---------')
 
             # Show current user query immediately
             with st.chat_message("user"):
@@ -286,17 +314,22 @@ elif st.session_state.page == "chat":
                 with st.spinner("Thinking..."):
 
                     result = graph.invoke(
-                        {
-                            "messages": [
-                                HumanMessage(
-                                    content=user_query
-                                )
-                            ],
-                            "worker_called": ""
-                        },
-                        config=config
-                    )
-
+                            {
+                                "messages": [
+                                    SystemMessage(
+                                        content=f"""
+                        Relevant user memories:
+                        {memory_text if memory_results else "No relevant memories found."}
+                        """
+                                    ),
+                                    HumanMessage(
+                                        content=user_query
+                                    )
+                                ],
+                                "worker_called": ""
+                            },
+                            config=config
+                        )
                     assistant_response = (
                         result["messages"][-1].content
                     )
@@ -304,6 +337,14 @@ elif st.session_state.page == "chat":
                     st.markdown(
                         assistant_response
                     )
+
+                    save_memory(
+                        user_id=st.session_state.user_id,
+                        user_message=user_query,
+                        assistant_message=assistant_response,
+                    )
+
+                    print("Memory saved successfully!")
 
             # ------------------------------------------
             # UPDATE CHAT METADATA
